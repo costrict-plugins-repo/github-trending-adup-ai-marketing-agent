@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "adup": {
+      "type": "http",
+      "url": "https://gateway.adup.io/mcp"
+    }
+  }
+}

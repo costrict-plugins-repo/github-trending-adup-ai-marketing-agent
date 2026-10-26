@@ -1,0 +1,77 @@
+---
+name: ads-overview
+description: Get a quick cross-platform advertising overview. Shows total spend, performance by platform, and top-level insights across all connected ad platforms for the active shop.
+---
+
+# Advertising Overview
+
+Pull a quick overview of all connected advertising platforms for the active shop.
+
+## Pre-flight
+
+1. Call `list_shops` to see brands + `connected_platforms`. If the shop is an agency account and no client has been specified, ask which client.
+2. Call `set_active_shop(shop_slug="<slug>")` — **required for tool discovery**: an agency key only sees the 6 virtual tools until a shop is active.
+3. Pass `shop_slug="<slug>"` on every data call below — the ambient active shop is per-API-key and races across concurrent runs.
+4. Call connector tools directly by name (`<platform>__<tool>`, `list_shops`). A tool search that finds no matching deferred tools only means the tools are already loaded or named differently, never that the connector dropped. Report the connector as disconnected only after a real connector call such as `list_shops` fails, and quote that error. **Sign-in needed:** if no adup tools are available (no `list_shops`, no `<platform>__` tools) or a call fails with an authentication error (`-32001` authentication required, `invalid_token`, "requires authentication", "needs authentication"), the adup connector is not signed in on this machine. Say that plainly, tell the user to sign in (Claude Code: `/mcp` → adup → Authenticate; terminal: `claude mcp login plugin:adup:adup`, with `--no-browser` on a machine without a browser; machines that cannot sign in: the automation connector; full steps: `/adup:setup`), and stop instead of reporting empty data, a disconnect or a generic failure. **Platforms per brand:** call a platform for a brand only when it is in that brand's `connected_platforms` from `list_shops`; a "not connected for brand" answer means skip that platform for that brand and name it in the report, never fail the run.
+
+If no date range given, default to last 30 days and state this.
+
+## Tool call sequence
+
+Call performance tools for each connected platform (check `connected_platforms` from `list_shops`). All platform tools are namespaced `platform__tool` on the aggregated `adup` connector:
+
+**If Facebook Ads connected:**
+```
+facebook__get_campaign_performance_metrics(shop_slug="<slug>", time_range={"since": "YYYY-MM-DD", "until": "YYYY-MM-DD"})
+```
+
+**If Google Ads connected:**
+```
+google_ads__get_google_ads_account_currency(shop_slug="<slug>")
+google_ads__get_google_ads_campaign_performance(shop_slug="<slug>", start_date="YYYY-MM-DD", end_date="YYYY-MM-DD")
+```
+Note: Google Ads returns costs in micros — divide by 1,000,000 for actual values.
+
+**If LinkedIn Ads connected:**
+```
+linkedin__get_ad_analytics(shop_slug="<slug>", ...)
+```
+LinkedIn Ads IS available via MCP under the `linkedin__` prefix. Use its analytics tools for spend, clicks, CTR, and leads/CPL.
+
+**If TikTok Ads connected:**
+```
+# The report tool is ID-scoped — get campaign IDs first
+tiktok__get_tiktok_campaigns(shop_slug="<slug>")
+tiktok__get_tiktok_campaign_reports(
+  shop_slug="<slug>",
+  campaign_ids=["<id1>", "<id2>", ...],   # required — from the call above
+  start_date="<YYYY-MM-DD>",              # required
+  end_date="<YYYY-MM-DD>"                 # required
+)
+```
+TikTok Ads IS available via MCP under the `tiktok__` prefix. Note there is no "all campaigns" mode on the report tools: `campaign_ids` (or `ad_ids`) must be passed explicitly.
+
+## Output format
+
+```
+## Advertising Overview — [Shop] | [Date Range]
+
+| Platform | Spend | Clicks | CPC | Conversions | CPA/CPL | ROAS |
+|----------|-------|--------|-----|-------------|---------|------|
+| Google Ads | €7,241 | 7,680 | €0.94 | 597 | €12.13 | 4.2x |
+| Facebook Ads | €6,339 | 18,600 | €0.34 | 187 | €33.90 | 3.1x |
+| LinkedIn Ads | €1,742 | 893 | €1.95 | 28 leads | €62.21 | — |
+
+**Total spend**: €15,322 | **Blended ROAS**: 3.7x
+
+### Insights
+- Google Ads delivers highest ROAS (4.2x) — consider increasing budget
+- Facebook ROAS at 3.1x is above minimum threshold
+- LinkedIn CPL €62 is efficient for B2B (benchmark: €80–200)
+```
+
+## Edge cases
+
+- Google Ads micros: always divide `cost_micros` by 1,000,000
+- ROAS only meaningful for e-commerce (SALES objective). For B2B/lead gen, use CPL instead
+- If a platform has no data: "No [platform] data in this period — campaigns may be paused"
